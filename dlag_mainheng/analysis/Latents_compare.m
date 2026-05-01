@@ -5,11 +5,15 @@
 %% stim_dir1 and stim_dir2, with readable stimulus-condition legends
 %% ------------------------------------------------------------------------
 %% NEW ADDITION:
-%% In non-condition mode, additionally split trials by stim_dir, compute DSL
-%% separately for each stim_dir, store results in:
-%%   DSL.indiv_bystimdir
-%%   DSL.rawlogical_bystimdir
-%%   DSL.logical_bystimdir
+%% In non-condition mode, additionally compute split DSL under multiple
+%% trial grouping schemes:
+%%   1) by stim_dir
+%%   2) by stim_name x stim_dir (4 groups)
+%%   3) by condition id (current paradigm: 16 groups)
+%% These are stored in fields such as:
+%%   DSL.indiv_bystimdir / DSL.rawlogical_bystimdir / DSL.logical_bystimdir
+%%   DSL.indiv_bystimnamedir / DSL.rawlogical_bystimnamedir / DSL.logical_bystimnamedir
+%%   DSL.indiv_bycondition / DSL.rawlogical_bycondition / DSL.logical_bycondition
 %% ------------------------------------------------------------------------
 %% NEW ADDITION 2:
 %% In non-condition mode, compute condition-specific posterior-based shared
@@ -22,7 +26,7 @@
 
 clc; clear;
 
-data_content = 'demean_count_within_trial';
+data_content = 'raw_count';
 % options:
 % raw_count, raw_fr, z_within_trial, z_within_condition,
 % z_across_conditions, demean_count_within_trial, demean_fr_within_trial, demean_pooledsd_within_condition
@@ -102,15 +106,28 @@ for cond_i = 1:numConditions
         DSL_threshold);
 
     % -------------------------------------------------------------
-    % NEW: non-condition mode only, split trials by stim_dir and
-    % compute an additional DSL set
+    % NEW: non-condition mode only, split trials by multiple schemes
     % -------------------------------------------------------------
     DSL_hist_stats_bystimdir = struct([]);
     DSL_figs_bystimdir = gobjects(0);
     Stats_bystimdir = [];
     Stats_figs_bystimdir = struct([]);
+
+    DSL_hist_stats_bystimnamedir = struct([]);
+    DSL_figs_bystimnamedir = gobjects(0);
+    Stats_bystimnamedir = [];
+    Stats_figs_bystimnamedir = struct([]);
+
+    DSL_hist_stats_bycondition = struct([]);
+    DSL_figs_bycondition = gobjects(0);
+    Stats_bycondition = [];
+    Stats_figs_bycondition = struct([]);
+
     trial_condition_ids = [];
     trial_stim_dir_values = [];
+    trial_stimnamedir_group_ids = [];
+    trial_stimnamedir_group_labels = {};
+    trial_condition_group_labels = {};
 
     % -------------------------------------------------------------
     % NEW: condition-specific posterior shared variance analysis
@@ -118,22 +135,34 @@ for cond_i = 1:numConditions
     CondPosteriorVarExp = [];
     CondPosteriorVarExp_figs = struct([]);
 
+    if use_condition_mode
+        main_filtered_display_name = 'condition-specific DSL filtered';
+    else
+        main_filtered_display_name = 'all-trials DSL filtered';
+    end
+    main_filtered_file_tag = makeFilterModeFileTag(main_filtered_display_name);
+
     if ~use_condition_mode
         trial_condition_ids = extractTrialConditionIdsFromConditionFull(condition_full, seqEst);
         trial_stim_dir_values = mapTrialConditionToStimDir(trial_condition_ids, condition_full);
 
-        [DSL, DSL_hist_stats_bystimdir, DSL_figs_bystimdir] = computeDSL_dlag_bystimdir( ...
+        % ---------------------------------------------------------
+        % 1) split by stim_dir
+        % ---------------------------------------------------------
+        [DSL, DSL_hist_stats_bystimdir, DSL_figs_bystimdir] = ...
+            computeDSL_dlag_bytrialgroups( ...
             DSL, ...
             bestModel.xDim_across, ...
             bestModel.xDim_within, ...
             seqEst, ...
             DSL_threshold, ...
-            trial_stim_dir_values);
+            trial_stim_dir_values, ...
+            {}, ...
+            'bystimdir', ...
+            'stim dir split');
 
-        % Reuse summarizeLatentCategories using DSL.logical_bystimdir
         DSL_for_bystimdir_stats = DSL;
         DSL_for_bystimdir_stats.logical = DSL.logical_bystimdir;
-
         [Stats_bystimdir, Stats_figs_bystimdir] = summarizeLatentCategories( ...
             varexp.indiv, ...
             bestModel.xDim_across, ...
@@ -141,7 +170,67 @@ for cond_i = 1:numConditions
             gp_params, ...
             ambiguousIdxs, ...
             DSL_for_bystimdir_stats, ...
-            true);
+            true, ...
+            'stim_dir DSL filtered');
+
+        % ---------------------------------------------------------
+        % 2) split by stim_name x stim_dir (4 groups)
+        % ---------------------------------------------------------
+        [trial_stimnamedir_group_ids, trial_stimnamedir_group_labels] = ...
+            mapTrialConditionToStimNameDirGroup(trial_condition_ids, condition_full);
+
+        [DSL, DSL_hist_stats_bystimnamedir, DSL_figs_bystimnamedir] = ...
+            computeDSL_dlag_bytrialgroups( ...
+            DSL, ...
+            bestModel.xDim_across, ...
+            bestModel.xDim_within, ...
+            seqEst, ...
+            DSL_threshold, ...
+            trial_stimnamedir_group_ids, ...
+            trial_stimnamedir_group_labels, ...
+            'bystimnamedir', ...
+            'stim name x stim dir split');
+
+        DSL_for_bystimnamedir_stats = DSL;
+        DSL_for_bystimnamedir_stats.logical = DSL.logical_bystimnamedir;
+        [Stats_bystimnamedir, Stats_figs_bystimnamedir] = summarizeLatentCategories( ...
+            varexp.indiv, ...
+            bestModel.xDim_across, ...
+            bestModel.xDim_within, ...
+            gp_params, ...
+            ambiguousIdxs, ...
+            DSL_for_bystimnamedir_stats, ...
+            true, ...
+            'stim_name x stim_dir DSL filtered');
+
+        % ---------------------------------------------------------
+        % 3) split by condition id (current paradigm: 16 groups)
+        % ---------------------------------------------------------
+        trial_condition_group_labels = buildConditionGroupLabels(condition_full);
+
+        [DSL, DSL_hist_stats_bycondition, DSL_figs_bycondition] = ...
+            computeDSL_dlag_bytrialgroups( ...
+            DSL, ...
+            bestModel.xDim_across, ...
+            bestModel.xDim_within, ...
+            seqEst, ...
+            DSL_threshold, ...
+            trial_condition_ids, ...
+            trial_condition_group_labels, ...
+            'bycondition', ...
+            'condition split');
+
+        DSL_for_bycondition_stats = DSL;
+        DSL_for_bycondition_stats.logical = DSL.logical_bycondition;
+        [Stats_bycondition, Stats_figs_bycondition] = summarizeLatentCategories( ...
+            varexp.indiv, ...
+            bestModel.xDim_across, ...
+            bestModel.xDim_within, ...
+            gp_params, ...
+            ambiguousIdxs, ...
+            DSL_for_bycondition_stats, ...
+            true, ...
+            'condition DSL filtered');
 
         [CondPosteriorVarExp, CondPosteriorVarExp_figs] = ...
             analyzeConditionSpecificPosteriorVarExpFromPooled( ...
@@ -166,7 +255,8 @@ for cond_i = 1:numConditions
         gp_params, ...
         ambiguousIdxs, ...
         DSL, ...
-        true);
+        true, ...
+        main_filtered_display_name);
 
     % -------------------------------------------------------------
     % Save original DSL figures
@@ -190,13 +280,39 @@ for cond_i = 1:numConditions
     end
 
     % -------------------------------------------------------------
+    % Save NEW split-by-stim_name x stim_dir DSL distribution figures
+    % -------------------------------------------------------------
+    if ~use_condition_mode
+        for g = 1:numel(DSL_figs_bystimnamedir)
+            if isgraphics(DSL_figs_bystimnamedir(g))
+                saveOneFigure(DSL_figs_bystimnamedir(g), tempfname, ...
+                    sprintf('stim_name_stim_dir_splited_DSL_distribution_group%d', g));
+                close(DSL_figs_bystimnamedir(g));
+            end
+        end
+    end
+
+    % -------------------------------------------------------------
+    % Save NEW split-by-condition DSL distribution figures
+    % -------------------------------------------------------------
+    if ~use_condition_mode
+        for g = 1:numel(DSL_figs_bycondition)
+            if isgraphics(DSL_figs_bycondition(g))
+                saveOneFigure(DSL_figs_bycondition(g), tempfname, ...
+                    sprintf('condition_splited_DSL_distribution_group%d', g));
+                close(DSL_figs_bycondition(g));
+            end
+        end
+    end
+
+    % -------------------------------------------------------------
     % Save original category figures
     % -------------------------------------------------------------
     for g = 1:numel(Stats_figs)
         saveOneFigure(Stats_figs(g).allLatentPct, tempfname, sprintf('percentage_latents_all_group%d', g));
         saveOneFigure(Stats_figs(g).allSharedVarPct, tempfname, sprintf('percentage_shared_variance_all_group%d', g));
-        saveOneFigure(Stats_figs(g).filteredLatentPct, tempfname, sprintf('percentage_latents_DSL_filtered_group%d', g));
-        saveOneFigure(Stats_figs(g).filteredSharedVarPct, tempfname, sprintf('percentage_shared_variance_DSL_filtered_group%d', g));
+        saveOneFigure(Stats_figs(g).filteredLatentPct, tempfname, sprintf('percentage_latents_%s_group%d', main_filtered_file_tag, g));
+        saveOneFigure(Stats_figs(g).filteredSharedVarPct, tempfname, sprintf('percentage_shared_variance_%s_group%d', main_filtered_file_tag, g));
 
         close(Stats_figs(g).allLatentPct);
         close(Stats_figs(g).allSharedVarPct);
@@ -210,10 +326,10 @@ for cond_i = 1:numConditions
     if ~use_condition_mode && ~isempty(Stats_figs_bystimdir)
         for g = 1:numel(Stats_figs_bystimdir)
             saveOneFigure(Stats_figs_bystimdir(g).filteredLatentPct, tempfname, ...
-                sprintf('stim_dir_splited_percentage_latents_DSL_filtered_group%d', g));
+                sprintf('stim_dir_splited_percentage_latents_stim_dir_DSL_filtered_group%d', g));
 
             saveOneFigure(Stats_figs_bystimdir(g).filteredSharedVarPct, tempfname, ...
-                sprintf('stim_dir_splited_percentage_shared_variance_DSL_filtered_group%d', g));
+                sprintf('stim_dir_splited_percentage_shared_variance_stim_dir_DSL_filtered_group%d', g));
 
             if isgraphics(Stats_figs_bystimdir(g).allLatentPct)
                 close(Stats_figs_bystimdir(g).allLatentPct);
@@ -226,6 +342,56 @@ for cond_i = 1:numConditions
             end
             if isgraphics(Stats_figs_bystimdir(g).filteredSharedVarPct)
                 close(Stats_figs_bystimdir(g).filteredSharedVarPct);
+            end
+        end
+    end
+
+    % -------------------------------------------------------------
+    % Save NEW stim_name x stim_dir split filtered category figures
+    % -------------------------------------------------------------
+    if ~use_condition_mode && ~isempty(Stats_figs_bystimnamedir)
+        for g = 1:numel(Stats_figs_bystimnamedir)
+            saveOneFigure(Stats_figs_bystimnamedir(g).filteredLatentPct, tempfname, ...
+                sprintf('stim_name_stim_dir_splited_percentage_latents_stim_name_stim_dir_DSL_filtered_group%d', g));
+            saveOneFigure(Stats_figs_bystimnamedir(g).filteredSharedVarPct, tempfname, ...
+                sprintf('stim_name_stim_dir_splited_percentage_shared_variance_stim_name_stim_dir_DSL_filtered_group%d', g));
+
+            if isgraphics(Stats_figs_bystimnamedir(g).allLatentPct)
+                close(Stats_figs_bystimnamedir(g).allLatentPct);
+            end
+            if isgraphics(Stats_figs_bystimnamedir(g).allSharedVarPct)
+                close(Stats_figs_bystimnamedir(g).allSharedVarPct);
+            end
+            if isgraphics(Stats_figs_bystimnamedir(g).filteredLatentPct)
+                close(Stats_figs_bystimnamedir(g).filteredLatentPct);
+            end
+            if isgraphics(Stats_figs_bystimnamedir(g).filteredSharedVarPct)
+                close(Stats_figs_bystimnamedir(g).filteredSharedVarPct);
+            end
+        end
+    end
+
+    % -------------------------------------------------------------
+    % Save NEW condition split filtered category figures
+    % -------------------------------------------------------------
+    if ~use_condition_mode && ~isempty(Stats_figs_bycondition)
+        for g = 1:numel(Stats_figs_bycondition)
+            saveOneFigure(Stats_figs_bycondition(g).filteredLatentPct, tempfname, ...
+                sprintf('condition_splited_percentage_latents_condition_DSL_filtered_group%d', g));
+            saveOneFigure(Stats_figs_bycondition(g).filteredSharedVarPct, tempfname, ...
+                sprintf('condition_splited_percentage_shared_variance_condition_DSL_filtered_group%d', g));
+
+            if isgraphics(Stats_figs_bycondition(g).allLatentPct)
+                close(Stats_figs_bycondition(g).allLatentPct);
+            end
+            if isgraphics(Stats_figs_bycondition(g).allSharedVarPct)
+                close(Stats_figs_bycondition(g).allSharedVarPct);
+            end
+            if isgraphics(Stats_figs_bycondition(g).filteredLatentPct)
+                close(Stats_figs_bycondition(g).filteredLatentPct);
+            end
+            if isgraphics(Stats_figs_bycondition(g).filteredSharedVarPct)
+                close(Stats_figs_bycondition(g).filteredSharedVarPct);
             end
         end
     end
@@ -244,16 +410,28 @@ for cond_i = 1:numConditions
                 close(CondPosteriorVarExp_figs(g).allSharedVarPct);
             end
 
-            if isgraphics(CondPosteriorVarExp_figs(g).DSLfilteredSharedVarPct)
-                saveOneFigure(CondPosteriorVarExp_figs(g).DSLfilteredSharedVarPct, tempfname, ...
-                    sprintf('condition_specific_posterior_shared_varexp_DSL_filtered_group%d', g));
-                close(CondPosteriorVarExp_figs(g).DSLfilteredSharedVarPct);
+            if isgraphics(CondPosteriorVarExp_figs(g).allTrialsDSLfilteredSharedVarPct)
+                saveOneFigure(CondPosteriorVarExp_figs(g).allTrialsDSLfilteredSharedVarPct, tempfname, ...
+                    sprintf('condition_specific_posterior_shared_varexp_all_trials_DSL_filtered_group%d', g));
+                close(CondPosteriorVarExp_figs(g).allTrialsDSLfilteredSharedVarPct);
             end
 
             if isgraphics(CondPosteriorVarExp_figs(g).stimDirDSLfilteredSharedVarPct)
                 saveOneFigure(CondPosteriorVarExp_figs(g).stimDirDSLfilteredSharedVarPct, tempfname, ...
                     sprintf('condition_specific_posterior_shared_varexp_stim_dir_DSL_filtered_group%d', g));
                 close(CondPosteriorVarExp_figs(g).stimDirDSLfilteredSharedVarPct);
+            end
+
+            if isgraphics(CondPosteriorVarExp_figs(g).stimNameDirDSLfilteredSharedVarPct)
+                saveOneFigure(CondPosteriorVarExp_figs(g).stimNameDirDSLfilteredSharedVarPct, tempfname, ...
+                    sprintf('condition_specific_posterior_shared_varexp_stim_name_stim_dir_DSL_filtered_group%d', g));
+                close(CondPosteriorVarExp_figs(g).stimNameDirDSLfilteredSharedVarPct);
+            end
+
+            if isgraphics(CondPosteriorVarExp_figs(g).conditionDSLfilteredSharedVarPct)
+                saveOneFigure(CondPosteriorVarExp_figs(g).conditionDSLfilteredSharedVarPct, tempfname, ...
+                    sprintf('condition_specific_posterior_shared_varexp_condition_DSL_filtered_group%d', g));
+                close(CondPosteriorVarExp_figs(g).conditionDSLfilteredSharedVarPct);
             end
         end
     end
@@ -266,8 +444,12 @@ for cond_i = 1:numConditions
         save(fullfile(tempfname, 'DSL_and_latent_category_stats.mat'), ...
              'DSL', 'DSL_hist_stats', 'Stats', ...
              'DSL_hist_stats_bystimdir', 'Stats_bystimdir', ...
+             'DSL_hist_stats_bystimnamedir', 'Stats_bystimnamedir', ...
+             'DSL_hist_stats_bycondition', 'Stats_bycondition', ...
              'CondPosteriorVarExp', ...
              'trial_condition_ids', 'trial_stim_dir_values', ...
+             'trial_stimnamedir_group_ids', 'trial_stimnamedir_group_labels', ...
+             'trial_condition_group_labels', ...
              'DSL_threshold', 'this_condition', 'data_content', 'runIdx', ...
              'bestModel', 'gp_params', 'ambiguousIdxs');
     else
@@ -316,9 +498,9 @@ if use_condition_mode
         saveOneFigure(SummaryCategory_figs(g).allSharedVarPct, ...
             '.', sprintf('%s_sum_all_conditions_percentage_shared_variance_all_group%d', data_content, g));
         saveOneFigure(SummaryCategory_figs(g).filteredLatentPct, ...
-            '.', sprintf('%s_sum_all_conditions_percentage_latents_DSL_filtered_group%d', data_content, g));
+            '.', sprintf('%s_sum_all_conditions_percentage_latents_%s_group%d', data_content, SummaryCategory.meta.filteredFileTag, g));
         saveOneFigure(SummaryCategory_figs(g).filteredSharedVarPct, ...
-            '.', sprintf('%s_sum_all_conditions_percentage_shared_variance_DSL_filtered_group%d', data_content, g));
+            '.', sprintf('%s_sum_all_conditions_percentage_shared_variance_%s_group%d', data_content, SummaryCategory.meta.filteredFileTag, g));
 
         close(SummaryCategory_figs(g).allLatentPct);
         close(SummaryCategory_figs(g).allSharedVarPct);
@@ -487,29 +669,66 @@ end
 function [DSL, histStatsByStimDir, figHandlesByStimDir] = computeDSL_dlag_bystimdir( ...
     DSL, xDim_across, xDim_within, seqEst, DSL_threshold, trial_stim_dir_values)
 
-    if numel(trial_stim_dir_values) ~= numel(seqEst)
-        error('Length of trial_stim_dir_values must match numel(seqEst).');
+    [DSL, histStatsByStimDir, figHandlesByStimDir] = computeDSL_dlag_bytrialgroups( ...
+        DSL, xDim_across, xDim_within, seqEst, DSL_threshold, ...
+        trial_stim_dir_values, {}, 'bystimdir', 'stim dir split');
+end
+
+
+function [DSL, histStatsBySplit, figHandlesBySplit] = computeDSL_dlag_bytrialgroups( ...
+    DSL, xDim_across, xDim_within, seqEst, DSL_threshold, ...
+    trial_group_ids, group_labels, field_suffix, split_title)
+
+    if numel(trial_group_ids) ~= numel(seqEst)
+        error('Length of trial_group_ids must match numel(seqEst).');
     end
 
-    stimDirValues = unique(trial_stim_dir_values(isfinite(trial_stim_dir_values)));
-    stimDirValues = sort(stimDirValues(:)');
-
-    if isempty(stimDirValues)
-        error('No valid stim_dir values found for split DSL computation.');
-    end
-
-    numDirs = numel(stimDirValues);
     numGroups = numel(xDim_within);
     localDims = xDim_across + xDim_within(:)';
 
-    DSL.meta_bystimdir = struct();
-    DSL.meta_bystimdir.stimDirValues = stimDirValues;
-    DSL.meta_bystimdir.stimDirLabels = arrayfun(@(k) sprintf('stim_dir%d', k), 1:numDirs, 'UniformOutput', false);
-    DSL.meta_bystimdir.threshold = DSL_threshold;
+    trial_group_ids = reshape(trial_group_ids, 1, []);
+    validMask = ~isnan(trial_group_ids);
+    rawGroupValues = unique(trial_group_ids(validMask));
 
-    DSL.indiv_bystimdir = cell(numDirs, numGroups);
-    DSL.rawlogical_bystimdir = cell(numDirs, numGroups);
-    DSL.logical_bystimdir = cell(1, numGroups);
+    if isempty(rawGroupValues)
+        error('No valid split groups found for field suffix %s.', field_suffix);
+    end
+
+    if isnumeric(rawGroupValues)
+        groupValues = sort(rawGroupValues(:)');
+    else
+        groupValues = unique(trial_group_ids(validMask), 'stable');
+    end
+    numSplits = numel(groupValues);
+
+    if isempty(group_labels)
+        group_labels_use = arrayfun(@(k) ...
+            sprintf('group%d = %s', k, formatSummaryValue(groupValues(k))), ...
+            1:numSplits, 'UniformOutput', false);
+    else
+        group_labels = cellstr(string(group_labels));
+        if isnumeric(groupValues) && all(isfinite(groupValues)) && ...
+                all(abs(groupValues - round(groupValues)) < 1e-10) && max(groupValues) <= numel(group_labels)
+            group_labels_use = group_labels(round(groupValues));
+        elseif numel(group_labels) == numSplits
+            group_labels_use = group_labels(:)';
+        else
+            error('group_labels length must match the number of unique trial groups or cover the indexed group IDs.');
+        end
+    end
+
+    indivField   = ['indiv_' field_suffix];
+    rawField     = ['rawlogical_' field_suffix];
+    logicalField = ['logical_' field_suffix];
+    metaField    = ['meta_' field_suffix];
+
+    DSL.(metaField).groupValues = groupValues(:)';
+    DSL.(metaField).groupLabels = group_labels_use(:)';
+    DSL.(metaField).threshold   = DSL_threshold;
+
+    DSL.(indivField)   = cell(numSplits, numGroups);
+    DSL.(rawField)     = cell(numSplits, numGroups);
+    DSL.(logicalField) = cell(1, numGroups);
 
     histTemplate = struct( ...
         'values', [], ...
@@ -518,80 +737,73 @@ function [DSL, histStatsByStimDir, figHandlesByStimDir] = computeDSL_dlag_bystim
         'counts', [], ...
         'percentages', [], ...
         'threshold', []);
+    histStatsBySplit = repmat(histTemplate, numSplits, numGroups);
+    figHandlesBySplit = gobjects(1, numGroups);
 
-    histStatsByStimDir = repmat(histTemplate, numDirs, numGroups);
-    figHandlesByStimDir = gobjects(1, numGroups);
-
-    % -------------------------------------------------------------
-    % Compute DSL separately within each stim_dir split
-    % -------------------------------------------------------------
-    for d = 1:numDirs
-        thisDir = stimDirValues(d);
-        keepTrials = (trial_stim_dir_values == thisDir);
+    % ---------------------------------------------------------
+    % Compute DSL separately within each split
+    % ---------------------------------------------------------
+    for s = 1:numSplits
+        thisValue = groupValues(s);
+        keepTrials = (trial_group_ids == thisValue);
 
         if ~any(keepTrials)
-            error('No trials found for stim_dir value %s.', formatSummaryValue(thisDir));
+            error('No trials found for split value %s.', formatSummaryValue(thisValue));
         end
 
-        seqEst_thisDir = seqEst(keepTrials);
+        seqEst_thisSplit = seqEst(keepTrials);
 
-        [DSL_thisDir, ~, ~] = computeDSL_dlag( ...
+        [DSL_thisSplit, ~, ~] = computeDSL_dlag( ...
             xDim_across, ...
             xDim_within, ...
-            seqEst_thisDir, ...
+            seqEst_thisSplit, ...
             DSL_threshold);
 
         for g = 1:numGroups
-            DSL.indiv_bystimdir{d, g} = DSL_thisDir.indiv{g};
-            DSL.rawlogical_bystimdir{d, g} = DSL_thisDir.rawlogical{g};
-            histStatsByStimDir(d, g) = buildDSLHistogramStats(DSL_thisDir.indiv{g}, DSL_threshold);
+            DSL.(indivField){s, g} = DSL_thisSplit.indiv{g};
+            DSL.(rawField){s, g} = DSL_thisSplit.rawlogical{g};
+            histStatsBySplit(s, g) = buildDSLHistogramStats(DSL_thisSplit.indiv{g}, DSL_threshold);
         end
     end
 
-    % -------------------------------------------------------------
-    % First AND across stim_dir within each group
-    % -------------------------------------------------------------
+    % ---------------------------------------------------------
+    % First AND across split groups within each neural group
+    % ---------------------------------------------------------
     for g = 1:numGroups
         tmpLogical = true(1, localDims(g));
-        for d = 1:numDirs
-            tmpLogical = tmpLogical & (DSL.rawlogical_bystimdir{d, g} ~= 0);
+        for s = 1:numSplits
+            tmpLogical = tmpLogical & (DSL.(rawField){s, g} ~= 0);
         end
-        DSL.logical_bystimdir{g} = double(tmpLogical);
+        DSL.(logicalField){g} = double(tmpLogical);
     end
 
-    % -------------------------------------------------------------
-    % Then for across latents, also AND across groups
-    % -------------------------------------------------------------
+    % ---------------------------------------------------------
+    % Then for across latents, also AND across neural groups
+    % ---------------------------------------------------------
     for j = 1:xDim_across
-        all_groups_and_all_dirs_flagged = true;
+        all_groups_flagged = true;
         for g = 1:numGroups
-            all_groups_and_all_dirs_flagged = all_groups_and_all_dirs_flagged && ...
-                (DSL.logical_bystimdir{g}(j) ~= 0);
+            all_groups_flagged = all_groups_flagged && (DSL.(logicalField){g}(j) ~= 0);
         end
         for g = 1:numGroups
-            DSL.logical_bystimdir{g}(j) = double(all_groups_and_all_dirs_flagged);
+            DSL.(logicalField){g}(j) = double(all_groups_flagged);
         end
     end
 
-    % -------------------------------------------------------------
-    % Build ONLY raw DSL distribution figures
-    % -------------------------------------------------------------
-    panelTitles = cell(1, numDirs);
-    for d = 1:numDirs
-        panelTitles{d} = sprintf('stim_dir%d = %s', d, formatSummaryValue(stimDirValues(d)));
-    end
-
+    % ---------------------------------------------------------
+    % Raw DSL distribution figures for each split
+    % ---------------------------------------------------------
     for g = 1:numGroups
-        rawValueCells = cell(1, numDirs);
-        for d = 1:numDirs
-            rawValueCells{d} = reshape(DSL.indiv_bystimdir{d, g}, 1, []);
+        rawValueCells = cell(1, numSplits);
+        for s = 1:numSplits
+            rawValueCells{s} = reshape(DSL.(indivField){s, g}, 1, []);
         end
 
-        figHandlesByStimDir(g) = plotDSLHistogramPanels( ...
+        figHandlesBySplit(g) = plotDSLHistogramPanels( ...
             rawValueCells, ...
-            panelTitles, ...
+            group_labels_use, ...
             DSL_threshold, ...
-            sprintf('Group %d DSL distribution (stim dir split)', g));
+            sprintf('Group %d DSL distribution (%s)', g, split_title));
     end
 end
 
@@ -699,6 +911,113 @@ function trial_stim_dir_values = mapTrialConditionToStimDir(trial_condition_ids,
 end
 
 
+function [trial_group_ids, group_labels] = mapTrialConditionToStimNameDirGroup(trial_condition_ids, condition_full)
+
+    dirVals = extractStimDirLevelsFromConditionFull(condition_full);
+    if numel(dirVals) ~= 2
+        error('stim_name x stim_dir split currently expects exactly 2 unique dir values, found %d.', numel(dirVals));
+    end
+
+    group_labels = { ...
+        sprintf('grating_dir = %s', formatSummaryValue(dirVals(1))), ...
+        sprintf('grating_dir = %s', formatSummaryValue(dirVals(2))), ...
+        sprintf('plaid_dir = %s',   formatSummaryValue(dirVals(1))), ...
+        sprintf('plaid_dir = %s',   formatSummaryValue(dirVals(2)))};
+
+    trial_condition_ids = trial_condition_ids(:)';
+    trial_group_ids = nan(size(trial_condition_ids));
+
+    for tr = 1:numel(trial_condition_ids)
+        condID = trial_condition_ids(tr);
+        currStim = lower(string(condition_full(condID).stim_name));
+
+        if currStim == "grating"
+            dirVal = condition_full(condID).grating_dir;
+            stimCode = 1;
+        elseif currStim == "plaid"
+            dirVal = condition_full(condID).plaid_dir;
+            stimCode = 2;
+        else
+            error('Unsupported stim_name in condition_full(%d): %s', condID, char(currStim));
+        end
+
+        dirCode = find(dirVals == dirVal, 1);
+        if isempty(dirCode)
+            error('Could not map dir value %s to stim_name x stim_dir group.', formatSummaryValue(dirVal));
+        end
+
+        trial_group_ids(tr) = (stimCode - 1) * 2 + dirCode;
+    end
+end
+
+
+function group_labels = buildConditionGroupLabels(condition_full)
+
+    nCond = numel(condition_full);
+    group_labels = cell(1, nCond);
+
+    for condID = 1:nCond
+        currStim = lower(string(condition_full(condID).stim_name));
+
+        if currStim == "grating"
+            stimShort = 'G';
+            dirVal = condition_full(condID).grating_dir;
+        elseif currStim == "plaid"
+            stimShort = 'P';
+            dirVal = condition_full(condID).plaid_dir;
+        else
+            stimShort = char(currStim);
+            dirVal = NaN;
+        end
+
+        if isfield(condition_full(condID), 'size')
+            sizeStr = formatSummaryValue(condition_full(condID).size);
+        else
+            sizeStr = 'NA';
+        end
+
+        if isfield(condition_full(condID), 'contrast')
+            contrastStr = formatSummaryValue(condition_full(condID).contrast);
+        else
+            contrastStr = 'NA';
+        end
+
+        group_labels{condID} = sprintf( ...
+            'cond%02d-%s-dir%s-sz%s-ct%s', ...
+            condID, stimShort, formatSummaryValue(dirVal), sizeStr, contrastStr);
+    end
+end
+
+
+function dirVals = extractStimDirLevelsFromConditionFull(condition_full)
+
+    dirVals = [];
+
+    for condID = 1:numel(condition_full)
+        currStim = lower(string(condition_full(condID).stim_name));
+
+        if currStim == "grating"
+            if ~isfield(condition_full(condID), 'grating_dir')
+                error('condition_full(%d) missing field grating_dir.', condID);
+            end
+            dirVals(end+1) = condition_full(condID).grating_dir; %#ok<AGROW>
+
+        elseif currStim == "plaid"
+            if ~isfield(condition_full(condID), 'plaid_dir')
+                error('condition_full(%d) missing field plaid_dir.', condID);
+            end
+            dirVals(end+1) = condition_full(condID).plaid_dir; %#ok<AGROW>
+
+        else
+            error('Unsupported stim_name in condition_full(%d): %s', condID, char(currStim));
+        end
+    end
+
+    dirVals = unique(dirVals);
+    dirVals = sort(dirVals(:)');
+end
+
+
 function ACG_mean = mean_acg_matrix(X, M, lags)
     Ntr = size(X, 1);
     ACG_mean = nan(1, numel(lags));
@@ -768,10 +1087,13 @@ function CCG_mean = mean_ccg_adjacent_pairs_matrix(X, M, lags)
 end
 
 
-function [Stats, figHandles] = summarizeLatentCategories(varexp_indiv, xDim_across, xDim_within, gp_params, ambiguousIdxs, DSL, makePlots)
+function [Stats, figHandles] = summarizeLatentCategories(varexp_indiv, xDim_across, xDim_within, gp_params, ambiguousIdxs, DSL, makePlots, filteredDisplayName)
 
     if nargin < 7
         makePlots = true;
+    end
+    if nargin < 8 || isempty(filteredDisplayName)
+        filteredDisplayName = 'DSL filtered';
     end
 
     if ~iscell(varexp_indiv)
@@ -843,6 +1165,8 @@ function [Stats, figHandles] = summarizeLatentCategories(varexp_indiv, xDim_acro
     Stats.meta.xDim_within = xDim_within(:)';
     Stats.meta.localDims = localDims;
     Stats.meta.filteredRule = 'Keep latents with DSL.logical == 1; remove DSL.logical == 0.';
+    Stats.meta.filteredDisplayName = filteredDisplayName;
+    Stats.meta.filteredFileTag = makeFilterModeFileTag(filteredDisplayName);
     Stats.classification.acrossDelay = acrossDelay;
     Stats.classification.acrossIdx = acrossIdx;
     Stats.classification.feedforwardIdx = ffIdx;
@@ -902,13 +1226,13 @@ function [Stats, figHandles] = summarizeLatentCategories(varexp_indiv, xDim_acro
 
             figHandles(g).filteredLatentPct = plotOneBarFigure( ...
                 Stats.group(g).filtered.percentLatents, labels, ...
-                sprintf('Group %d - Percentage of latents (DSL-filtered)', g), ...
+                sprintf('Group %d - Percentage of latents (%s)', g, filteredDisplayName), ...
                 'Latent category', ...
                 'Percentage of latents (%)');
 
             figHandles(g).filteredSharedVarPct = plotOneBarFigure( ...
                 Stats.group(g).filtered.percentSharedVariance, labels, ...
-                sprintf('Group %d - Percentage of shared variance explained (DSL-filtered)', g), ...
+                sprintf('Group %d - Percentage of shared variance explained (%s)', g, filteredDisplayName), ...
                 'Latent category', ...
                 'Percentage of shared variance explained (%)');
         end
@@ -1095,30 +1419,148 @@ function figHandle = plotDSLHistogramPanels(valueCells, panelTitles, DSL_thresho
     end
     ymax = max(100, ymax * 1.1 + eps);
 
-    figHandle = figure;
-    tl = tiledlayout(figHandle, 1, numPanels, 'Padding', 'compact', 'TileSpacing', 'compact');
+    [nRows, nCols] = chooseHistogramGrid(numPanels);
+    [figWidth, figHeight] = chooseHistogramFigureSize(nRows, nCols, numPanels);
+    [titleFontSize, axisFontSize, labelFontSize] = chooseHistogramFontSizes(numPanels);
+
+    figHandle = figure('Color', 'w', 'Units', 'pixels', ...
+        'Position', [60, 60, figWidth, figHeight]);
+    tl = tiledlayout(figHandle, nRows, nCols, 'Padding', 'compact', 'TileSpacing', 'compact');
 
     for k = 1:numPanels
         ax = nexttile(tl, k);
         bar(ax, panelHist{k}.centers, panelHist{k}.percentages, 1);
         hold(ax, 'on');
-        xline(ax, DSL_threshold, '--', 'LineWidth', 1.5);
+        xline(ax, DSL_threshold, '--', 'LineWidth', 1.4);
         hold(ax, 'off');
 
-        xlabel(ax, 'DSL');
-        ylabel(ax, 'Percentage of latents (%)');
-        title(ax, panelTitles{k});
         xlim(ax, [commonEdges(1), commonEdges(end)]);
         ylim(ax, [0, ymax]);
+        grid(ax, 'on');
+        box(ax, 'off');
+        ax.FontSize = axisFontSize;
+        ax.TitleFontWeight = 'bold';
+        ax.TitleFontSizeMultiplier = 1;
+
+        title(ax, formatHistogramPanelTitle(panelTitles{k}, numPanels), ...
+            'FontSize', titleFontSize, 'Interpreter', 'none');
+
+        if isBottomRowTile(k, nRows, nCols, numPanels)
+            xlabel(ax, 'DSL', 'FontSize', labelFontSize);
+        else
+            xlabel(ax, '');
+        end
+
+        if isLeftColumnTile(k, nCols)
+            ylabel(ax, 'Percentage of latents (%)', 'FontSize', labelFontSize);
+        else
+            ylabel(ax, '');
+        end
     end
 
-    sgtitle(tl, figTitle);
+    sgtitle(tl, figTitle, 'FontSize', max(titleFontSize + 3, 12), 'FontWeight', 'bold');
 end
 
 
+
+
+function [nRows, nCols] = chooseHistogramGrid(numPanels)
+
+    if numPanels <= 3
+        nRows = 1;
+        nCols = numPanels;
+    elseif numPanels <= 4
+        nRows = 2;
+        nCols = 2;
+    elseif numPanels <= 6
+        nRows = 2;
+        nCols = 3;
+    elseif numPanels <= 8
+        nRows = 2;
+        nCols = 4;
+    elseif numPanels <= 12
+        nRows = 3;
+        nCols = 4;
+    elseif numPanels <= 16
+        nRows = 4;
+        nCols = 4;
+    else
+        nCols = ceil(sqrt(numPanels));
+        nRows = ceil(numPanels / nCols);
+    end
+end
+
+
+function [figWidth, figHeight] = chooseHistogramFigureSize(nRows, nCols, numPanels)
+
+    if numPanels <= 4
+        tileWidth = 420;
+        tileHeight = 320;
+    elseif numPanels <= 8
+        tileWidth = 360;
+        tileHeight = 290;
+    else
+        tileWidth = 340;
+        tileHeight = 260;
+    end
+
+    figWidth = max(1100, nCols * tileWidth);
+    figHeight = max(700, nRows * tileHeight + 80);
+end
+
+
+function [titleFontSize, axisFontSize, labelFontSize] = chooseHistogramFontSizes(numPanels)
+
+    if numPanels <= 4
+        titleFontSize = 12;
+        axisFontSize = 11;
+        labelFontSize = 11;
+    elseif numPanels <= 8
+        titleFontSize = 11;
+        axisFontSize = 10;
+        labelFontSize = 10;
+    else
+        titleFontSize = 10;
+        axisFontSize = 9;
+        labelFontSize = 9;
+    end
+end
+
+
+function tf = isBottomRowTile(tileIdx, nRows, nCols, numPanels)
+
+    rowIdx = ceil(tileIdx / nCols);
+    lastUsedRow = ceil(numPanels / nCols);
+    tf = (rowIdx == lastUsedRow);
+end
+
+
+function tf = isLeftColumnTile(tileIdx, nCols)
+
+    tf = mod(tileIdx - 1, nCols) == 0;
+end
+
+
+function titleStr = formatHistogramPanelTitle(titleStr, numPanels)
+
+    titleStr = char(string(titleStr));
+
+    if numPanels >= 12
+        titleStr = strrep(titleStr, '-dir', sprintf('\ndir'));
+        titleStr = strrep(titleStr, '-sz', ' | sz');
+        titleStr = strrep(titleStr, '-ct', ' ct');
+        titleStr = strrep(titleStr, '_', ' ');
+    elseif numPanels >= 8
+        titleStr = strrep(titleStr, '-dir', ' | dir');
+        titleStr = strrep(titleStr, '-sz', ' | sz');
+        titleStr = strrep(titleStr, '-ct', ' ct');
+        titleStr = strrep(titleStr, '_', ' ');
+    end
+end
+
 function saveOneFigure(figHandle, folderPath, baseName)
     savefig(figHandle, fullfile(folderPath, [baseName, '.fig']));
-    exportgraphics(figHandle, fullfile(folderPath, [baseName, '.png']), 'Resolution', 300);
+    exportgraphics(figHandle, fullfile(folderPath, [baseName, '.png']), 'Resolution', 400);
 end
 
 
@@ -1204,6 +1646,12 @@ function [SummaryCategory, figHandles] = summarizeAllConditionsCategories(AllCon
     SummaryCategory.meta.stimDirPanelTitles = { ...
         sprintf('%s = %s', conditionMap.meta.stimDirLabels{1}, formatSummaryValue(conditionMap.meta.stimDirValues(1))), ...
         sprintf('%s = %s', conditionMap.meta.stimDirLabels{2}, formatSummaryValue(conditionMap.meta.stimDirValues(2)))};
+    if isfield(AllConditionResults(1).Stats, 'meta') && isfield(AllConditionResults(1).Stats.meta, 'filteredDisplayName')
+        SummaryCategory.meta.filteredDisplayName = AllConditionResults(1).Stats.meta.filteredDisplayName;
+    else
+        SummaryCategory.meta.filteredDisplayName = 'DSL filtered';
+    end
+    SummaryCategory.meta.filteredFileTag = makeFilterModeFileTag(SummaryCategory.meta.filteredDisplayName);
 
     figHandles = struct([]);
 
@@ -1327,7 +1775,7 @@ function [SummaryCategory, figHandles] = summarizeAllConditionsCategories(AllCon
             filt_dir1_percentLatents, filt_dir2_percentLatents, ...
             labels, SummaryCategory.meta.panelConditionShortLabels, ...
             SummaryCategory.meta.stimDirPanelTitles, ...
-            sprintf('Group %d - Percentage of latents (sum all conditions, DSL-filtered)', g), ...
+            sprintf('Group %d - Percentage of latents (sum all conditions, %s)', g, SummaryCategory.meta.filteredDisplayName), ...
             'Latent category', ...
             'Percentage of latents (%)');
 
@@ -1335,7 +1783,7 @@ function [SummaryCategory, figHandles] = summarizeAllConditionsCategories(AllCon
             filt_dir1_percentSharedVar, filt_dir2_percentSharedVar, ...
             labels, SummaryCategory.meta.panelConditionShortLabels, ...
             SummaryCategory.meta.stimDirPanelTitles, ...
-            sprintf('Group %d - Percentage of shared variance explained (sum all conditions, DSL-filtered)', g), ...
+            sprintf('Group %d - Percentage of shared variance explained (sum all conditions, %s)', g, SummaryCategory.meta.filteredDisplayName), ...
             'Latent category', ...
             'Percentage of shared variance explained (%)');
     end
@@ -1509,6 +1957,14 @@ function s = formatSummaryValue(v)
 end
 
 
+function tag = makeFilterModeFileTag(label)
+    label = char(string(label));
+    tag = lower(label);
+    tag = regexprep(tag, '[^a-z0-9]+', '_');
+    tag = regexprep(tag, '^_+|_+$', '');
+end
+
+
 function out = ternary_label(code, label1, label2)
     if isempty(code) || ~isfinite(code)
         out = '';
@@ -1677,6 +2133,8 @@ function [CondSV, figHandles] = analyzeConditionSpecificPosteriorVarExpFromPoole
     CondSV.meta.stimDirLabels = stimDirLabels;
     CondSV.meta.stimDirValues = stimDirValues;
     CondSV.meta.categoryLabels = categoryLabels;
+    CondSV.meta.filterModeNames = {'all', 'filtered_DSL_alltrials', 'filtered_DSL_bystimdir', 'filtered_DSL_bystimnamedir', 'filtered_DSL_bycondition'};
+    CondSV.meta.filterModeDisplayNames = {'all latents', 'all-trials DSL filtered', 'stim_dir DSL filtered', 'stim_name x stim_dir DSL filtered', 'condition DSL filtered'};
     CondSV.meta.acrossDelay = acrossDelay;
     CondSV.meta.feedforwardIdx = ffIdx;
     CondSV.meta.feedbackIdx = fbIdx;
@@ -1756,6 +2214,18 @@ function [CondSV, figHandles] = analyzeConditionSpecificPosteriorVarExpFromPoole
             keepDSLByStimDir = true(1, localDim);
         end
 
+        if isfield(DSL, 'logical_bystimnamedir') && ~isempty(DSL.logical_bystimnamedir)
+            keepDSLByStimNameDir = reshape(DSL.logical_bystimnamedir{g}, 1, []) ~= 0;
+        else
+            keepDSLByStimNameDir = true(1, localDim);
+        end
+
+        if isfield(DSL, 'logical_bycondition') && ~isempty(DSL.logical_bycondition)
+            keepDSLByCondition = reshape(DSL.logical_bycondition{g}, 1, []) ~= 0;
+        else
+            keepDSLByCondition = true(1, localDim);
+        end
+
         % ---------------------------------------------------------
         % Per-condition latent raw / fraction / percent
         % ---------------------------------------------------------
@@ -1800,7 +2270,7 @@ function [CondSV, figHandles] = analyzeConditionSpecificPosteriorVarExpFromPoole
         for l = 1:localDim
             latentInfo = condsv_makeLatentInfo( ...
                 g, l, xDim_across, ffIdx, fbIdx, ambiguousAll, ...
-                DSL.logical{g}(l), keepDSLByStimDir(l));
+                DSL.logical{g}(l), keepDSLByStimDir(l), keepDSLByStimNameDir(l), keepDSLByCondition(l));
 
             CondSV.group(g).latent(l).groupIndex = g;
             CondSV.group(g).latent(l).localLatentIndex = l;
@@ -1817,6 +2287,12 @@ function [CondSV, figHandles] = analyzeConditionSpecificPosteriorVarExpFromPoole
 
             CondSV.group(g).latent(l).DSL_bystimdir.logical = keepDSLByStimDir(l);
             CondSV.group(g).latent(l).DSL_bystimdir.label = latentInfo.dslByStimDirLabel;
+
+            CondSV.group(g).latent(l).DSL_bystimnamedir.logical = keepDSLByStimNameDir(l);
+            CondSV.group(g).latent(l).DSL_bystimnamedir.label = latentInfo.dslByStimNameDirLabel;
+
+            CondSV.group(g).latent(l).DSL_bycondition.logical = keepDSLByCondition(l);
+            CondSV.group(g).latent(l).DSL_bycondition.label = latentInfo.dslByConditionLabel;
 
             CondSV.group(g).latent(l).allByConditionId.rawSharedVariance = rawLatByCondition(:, l);
             CondSV.group(g).latent(l).allByConditionId.fractionSharedVariance = fracLatByCondition(:, l);
@@ -1847,14 +2323,17 @@ function [CondSV, figHandles] = analyzeConditionSpecificPosteriorVarExpFromPoole
         end
 
         % ---------------------------------------------------------
-        % Category-level summaries under 3 filter modes
+        % Category-level summaries under 5 filter modes
         % ---------------------------------------------------------
-        modeNames = {'all', 'filtered_DSL', 'filtered_DSL_bystimdir'};
-        modeMasks = {keepAll, keepDSL, keepDSLByStimDir};
+        modeConfigs = struct( ...
+            'name', {'all', 'filtered_DSL_alltrials', 'filtered_DSL_bystimdir', 'filtered_DSL_bystimnamedir', 'filtered_DSL_bycondition'}, ...
+            'keepMask', {keepAll, keepDSL, keepDSLByStimDir, keepDSLByStimNameDir, keepDSLByCondition}, ...
+            'displayName', {'all latents', 'all-trials DSL filtered', 'stim_dir DSL filtered', 'stim_name x stim_dir DSL filtered', 'condition DSL filtered'}, ...
+            'figField', {'allSharedVarPct', 'allTrialsDSLfilteredSharedVarPct', 'stimDirDSLfilteredSharedVarPct', 'stimNameDirDSLfilteredSharedVarPct', 'conditionDSLfilteredSharedVarPct'});
 
-        for mi = 1:numel(modeNames)
-            modeName = modeNames{mi};
-            keepMask = modeMasks{mi};
+        for mi = 1:numel(modeConfigs)
+            modeName = modeConfigs(mi).name;
+            keepMask = modeConfigs(mi).keepMask;
 
             catRawByCondition = nan(numAllConditions, numel(categoryLabels));
             catFracByCondition = nan(numAllConditions, numel(categoryLabels));
@@ -1879,6 +2358,8 @@ function [CondSV, figHandles] = analyzeConditionSpecificPosteriorVarExpFromPoole
                 end
             end
 
+            CondSV.group(g).category.(modeName).displayName = modeConfigs(mi).displayName;
+            CondSV.group(g).category.(modeName).figureFieldName = modeConfigs(mi).figField;
             CondSV.group(g).category.(modeName).rawByConditionId = catRawByCondition;
             CondSV.group(g).category.(modeName).fractionByConditionId = catFracByCondition;
             CondSV.group(g).category.(modeName).percentByConditionId = catPctByCondition;
@@ -1912,40 +2393,31 @@ function [CondSV, figHandles] = analyzeConditionSpecificPosteriorVarExpFromPoole
     % Plot category-level figures only
     % -------------------------------------------------------------
     if makePlots
+        plotModeConfigs = struct( ...
+            'fieldName', {'allSharedVarPct', 'allTrialsDSLfilteredSharedVarPct', 'stimDirDSLfilteredSharedVarPct', 'stimNameDirDSLfilteredSharedVarPct', 'conditionDSLfilteredSharedVarPct'}, ...
+            'modeName', {'all', 'filtered_DSL_alltrials', 'filtered_DSL_bystimdir', 'filtered_DSL_bystimnamedir', 'filtered_DSL_bycondition'}, ...
+            'displayName', {'all latents', 'all-trials DSL filtered', 'stim_dir DSL filtered', 'stim_name x stim_dir DSL filtered', 'condition DSL filtered'});
+
         for g = 1:numGroups
+            for mi = 1:numel(plotModeConfigs)
+                modeName = plotModeConfigs(mi).modeName;
+                fieldName = plotModeConfigs(mi).fieldName;
+                displayName = plotModeConfigs(mi).displayName;
 
-            figHandles(g).allSharedVarPct = condsv_plotCategoryFigureSplitByDir( ...
-                CondSV.group(g).category.all.stim_dir(1).percentSharedVariance, ...
-                CondSV.group(g).category.all.stim_dir(2).percentSharedVariance, ...
-                categoryLabels, panelConditionShortLabels, ...
-                {sprintf('%s = %s', stimDirLabels{1}, formatSummaryValue(stimDirValues(1))), ...
-                 sprintf('%s = %s', stimDirLabels{2}, formatSummaryValue(stimDirValues(2)))}, ...
-                sprintf('Group %d - Condition-specific shared variance explained (all latents)', g), ...
-                'Latent category', ...
-                'Percentage of shared variance explained (%)', ...
-                condColors);
+                figHandles(g).(fieldName) = condsv_plotCategoryFigureSplitByDir( ...
+                    CondSV.group(g).category.(modeName).stim_dir(1).percentSharedVariance, ...
+                    CondSV.group(g).category.(modeName).stim_dir(2).percentSharedVariance, ...
+                    categoryLabels, panelConditionShortLabels, ...
+                    {sprintf('%s = %s', stimDirLabels{1}, formatSummaryValue(stimDirValues(1))), ...
+                     sprintf('%s = %s', stimDirLabels{2}, formatSummaryValue(stimDirValues(2)))}, ...
+                    sprintf('Group %d - Condition-specific shared variance explained (%s)', g, displayName), ...
+                    'Latent category', ...
+                    'Percentage of shared variance explained (%)', ...
+                    condColors);
+            end
 
-            figHandles(g).DSLfilteredSharedVarPct = condsv_plotCategoryFigureSplitByDir( ...
-                CondSV.group(g).category.filtered_DSL.stim_dir(1).percentSharedVariance, ...
-                CondSV.group(g).category.filtered_DSL.stim_dir(2).percentSharedVariance, ...
-                categoryLabels, panelConditionShortLabels, ...
-                {sprintf('%s = %s', stimDirLabels{1}, formatSummaryValue(stimDirValues(1))), ...
-                 sprintf('%s = %s', stimDirLabels{2}, formatSummaryValue(stimDirValues(2)))}, ...
-                sprintf('Group %d - Condition-specific shared variance explained (DSL filtered)', g), ...
-                'Latent category', ...
-                'Percentage of shared variance explained (%)', ...
-                condColors);
-
-            figHandles(g).stimDirDSLfilteredSharedVarPct = condsv_plotCategoryFigureSplitByDir( ...
-                CondSV.group(g).category.filtered_DSL_bystimdir.stim_dir(1).percentSharedVariance, ...
-                CondSV.group(g).category.filtered_DSL_bystimdir.stim_dir(2).percentSharedVariance, ...
-                categoryLabels, panelConditionShortLabels, ...
-                {sprintf('%s = %s', stimDirLabels{1}, formatSummaryValue(stimDirValues(1))), ...
-                 sprintf('%s = %s', stimDirLabels{2}, formatSummaryValue(stimDirValues(2)))}, ...
-                sprintf('Group %d - Condition-specific shared variance explained (DSL by stim_dir filtered)', g), ...
-                'Latent category', ...
-                'Percentage of shared variance explained (%)', ...
-                condColors);
+            % backward-compatible alias
+            figHandles(g).DSLfilteredSharedVarPct = figHandles(g).allTrialsDSLfilteredSharedVarPct;
         end
     end
 end
@@ -2114,7 +2586,7 @@ function ymax = condsv_computeFlexibleYMax(values)
 end
 
 
-function latentInfo = condsv_makeLatentInfo(groupIdx, localIdx, xDim_across, ffIdx, fbIdx, ambiguousIdxs, dslLogical, dslByStimDirLogical)
+function latentInfo = condsv_makeLatentInfo(groupIdx, localIdx, xDim_across, ffIdx, fbIdx, ambiguousIdxs, dslLogical, dslByStimDirLogical, dslByStimNameDirLogical, dslByConditionLogical)
 
     latentInfo = struct();
 
@@ -2154,14 +2626,30 @@ function latentInfo = condsv_makeLatentInfo(groupIdx, localIdx, xDim_across, ffI
         dslByStimDirLabel = 'DSL(by stim_dir) remove';
     end
 
+    if dslByStimNameDirLogical ~= 0
+        dslByStimNameDirLabel = 'DSL(by stim_name x stim_dir) keep';
+    else
+        dslByStimNameDirLabel = 'DSL(by stim_name x stim_dir) remove';
+    end
+
+    if dslByConditionLogical ~= 0
+        dslByConditionLabel = 'DSL(by condition) keep';
+    else
+        dslByConditionLabel = 'DSL(by condition) remove';
+    end
+
     latentInfo.dslLabel = dslLabel;
     latentInfo.dslByStimDirLabel = dslByStimDirLabel;
+    latentInfo.dslByStimNameDirLabel = dslByStimNameDirLabel;
+    latentInfo.dslByConditionLabel = dslByConditionLabel;
     latentInfo.latentLine = latentLine;
     latentInfo.titleLines = { ...
         sprintf('Group %d', groupIdx), ...
         latentLine, ...
         dslLabel, ...
-        dslByStimDirLabel};
+        dslByStimDirLabel, ...
+        dslByStimNameDirLabel, ...
+        dslByConditionLabel};
 end
 
 
