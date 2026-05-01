@@ -4,7 +4,7 @@
 %% although can align this with populational dir preference, but how processing for plaid dir?
 %% Suppose we find some ways, but this main effect is not our main focus point.
 %% plan to use 3 way (contrast size and stim name)anova to analysis each latent
-%% use label ambiguous and DSL.logical / DSL.logical_bystimdir to label latents
+%% use label ambiguous and DSL.logical / DSL.logical_bystimdir / DSL.logical_bystimnamedir / DSL.logical_bycondition to label latents
 %% use model_data_allruns{}.condition_full to label trials condition identity
 
 % ==================
@@ -96,7 +96,9 @@ function Results = analyze_dlag_latents_by_condition(condition_full, seqEst, xDi
 %   - bestModel contains xDim_across and xDim_within.
 %   - latent keep/remove labels use:
 %       * DSL.logical
-%       * DSL.logical_bystimdir  (final AND result, not raw per-dir)
+%       * DSL.logical_bystimdir      (final AND result, not raw per-dir)
+%       * DSL.logical_bystimnamedir  (final AND result across 4 stim_name x stim_dir groups)
+%       * DSL.logical_bycondition    (final AND result across all conditions)
 
     alpha = 0.05;
 
@@ -112,12 +114,24 @@ function Results = analyze_dlag_latents_by_condition(condition_full, seqEst, xDi
     if ~isfield(DSL, 'logical_bystimdir')
         error('DSL must contain field DSL.logical_bystimdir.');
     end
+    if ~isfield(DSL, 'logical_bystimnamedir')
+        error('DSL must contain field DSL.logical_bystimnamedir.');
+    end
+    if ~isfield(DSL, 'logical_bycondition')
+        error('DSL must contain field DSL.logical_bycondition.');
+    end
 
     if numel(DSL.logical) ~= numGroups
         error('DSL.logical must have one cell per group.');
     end
     if numel(DSL.logical_bystimdir) ~= numGroups
         error('DSL.logical_bystimdir must have one cell per group.');
+    end
+    if numel(DSL.logical_bystimnamedir) ~= numGroups
+        error('DSL.logical_bystimnamedir must have one cell per group.');
+    end
+    if numel(DSL.logical_bycondition) ~= numGroups
+        error('DSL.logical_bycondition must have one cell per group.');
     end
 
     if isempty(seqEst)
@@ -137,6 +151,12 @@ function Results = analyze_dlag_latents_by_condition(condition_full, seqEst, xDi
         end
         if numel(DSL.logical_bystimdir{g}) ~= localDims(g)
             error('DSL.logical_bystimdir{%d} length does not match xDim_across + xDim_within(%d).', g, g);
+        end
+        if numel(DSL.logical_bystimnamedir{g}) ~= localDims(g)
+            error('DSL.logical_bystimnamedir{%d} length does not match xDim_across + xDim_within(%d).', g, g);
+        end
+        if numel(DSL.logical_bycondition{g}) ~= localDims(g)
+            error('DSL.logical_bycondition{%d} length does not match xDim_across + xDim_within(%d).', g, g);
         end
     end
 
@@ -196,6 +216,8 @@ function Results = analyze_dlag_latents_by_condition(condition_full, seqEst, xDi
 
     Results.meta.DSLRules.allTrials = 'Use DSL.logical.';
     Results.meta.DSLRules.byStimDir = 'Use DSL.logical_bystimdir (final AND result; do not use raw per-dir values as latent labels).';
+    Results.meta.DSLRules.byStimNameDir = 'Use DSL.logical_bystimnamedir (final AND result across stim_name x stim_dir groups).';
+    Results.meta.DSLRules.byCondition = 'Use DSL.logical_bycondition (final AND result across all conditions).';
 
     Results.trialMeta = trialMeta;
 
@@ -218,7 +240,8 @@ function Results = analyze_dlag_latents_by_condition(condition_full, seqEst, xDi
 
             latentInfo = make_latent_info( ...
                 g, l, xDim_across, acrossCategory, ...
-                DSL.logical{g}(l), DSL.logical_bystimdir{g}(l));
+                DSL.logical{g}(l), DSL.logical_bystimdir{g}(l), ...
+                DSL.logical_bystimnamedir{g}(l), DSL.logical_bycondition{g}(l));
 
             [meanTime, semTime, respMean, respSEM, respN, condTrialSeqIdx, condTrialIds] = ...
                 compute_condition_averages(X, trialMean, trialMeta.condIdx, trialMeta.trialId, 8);
@@ -240,6 +263,10 @@ function Results = analyze_dlag_latents_by_condition(condition_full, seqEst, xDi
             Results.group(g).latent(l).DSL.label = latentInfo.dslLabel;
             Results.group(g).latent(l).DSL.logical_bystimdir = DSL.logical_bystimdir{g}(l);
             Results.group(g).latent(l).DSL.label_bystimdir = latentInfo.dslByStimDirLabel;
+            Results.group(g).latent(l).DSL.logical_bystimnamedir = DSL.logical_bystimnamedir{g}(l);
+            Results.group(g).latent(l).DSL.label_bystimnamedir = latentInfo.dslByStimNameDirLabel;
+            Results.group(g).latent(l).DSL.logical_bycondition = DSL.logical_bycondition{g}(l);
+            Results.group(g).latent(l).DSL.label_bycondition = latentInfo.dslByConditionLabel;
 
             Results.group(g).latent(l).titleLines = latentInfo.titleLines;
 
@@ -487,7 +514,7 @@ end
 % =========================================================================
 % Build one latent info struct for titles and labels
 % =========================================================================
-function latentInfo = make_latent_info(groupIdx, localIdx, xDim_across, acrossCategory, dslLogical, dslLogicalByStimDir)
+function latentInfo = make_latent_info(groupIdx, localIdx, xDim_across, acrossCategory, dslLogical, dslLogicalByStimDir, dslLogicalByStimNameDir, dslLogicalByCondition)
     latentInfo = struct();
 
     if localIdx <= xDim_across
@@ -504,25 +531,22 @@ function latentInfo = make_latent_info(groupIdx, localIdx, xDim_across, acrossCa
         latentLine = sprintf('Within latent %d', latentInfo.withinIndex);
     end
 
-    if dslLogical == 1
-        dslLabel = 'DSL keep';
-    else
-        dslLabel = 'DSL remove';
-    end
-
-    if dslLogicalByStimDir == 1
-        dslByStimDirLabel = 'DSL(by stim_dir) keep';
-    else
-        dslByStimDirLabel = 'DSL(by stim_dir) remove';
-    end
+    dslLabel = dsl_keep_remove_label(dslLogical, 'alltrials');
+    dslByStimDirLabel = dsl_keep_remove_label(dslLogicalByStimDir, 'bystimdir');
+    dslByStimNameDirLabel = dsl_keep_remove_label(dslLogicalByStimNameDir, 'bystimnamedir');
+    dslByConditionLabel = dsl_keep_remove_label(dslLogicalByCondition, 'bycondition');
 
     latentInfo.dslLabel = dslLabel;
     latentInfo.dslByStimDirLabel = dslByStimDirLabel;
+    latentInfo.dslByStimNameDirLabel = dslByStimNameDirLabel;
+    latentInfo.dslByConditionLabel = dslByConditionLabel;
     latentInfo.titleLines = { ...
         sprintf('Group %d', groupIdx), ...
         latentLine, ...
         dslLabel, ...
-        dslByStimDirLabel};
+        dslByStimDirLabel, ...
+        dslByStimNameDirLabel, ...
+        dslByConditionLabel};
 end
 
 % =========================================================================
@@ -776,16 +800,15 @@ end
 function [figFile, pngFile] = plot_across_timecourse_figure(Results, acrossIdx, timeDir)
 
     numGroups = Results.meta.numGroups;
-    condLabels = Results.meta.conditionLabels;
+    condLabels = Results.meta.conditionShortLabels;
     tAxis = Results.meta.timeAxis;
 
     category = Results.meta.acrossCategory{acrossIdx};
-    dslLabel = Results.group(1).latent(acrossIdx).DSL.label;
-    dslByStimDirLabel = Results.group(1).latent(acrossIdx).DSL.label_bystimdir;
 
+    % Short, stable file name. DSL keep/remove states remain in figure title.
     baseName = sanitize_filename(sprintf( ...
-        'across_latent_%03d_%s_%s_%s_timecourse', ...
-        acrossIdx, category, label_to_token(dslLabel), label_to_token(dslByStimDirLabel)));
+        'A%03d_%s_tc', ...
+        acrossIdx, category));
 
     figFile = fullfile(timeDir, [baseName, '.fig']);
     pngFile = fullfile(timeDir, [baseName, '.png']);
@@ -841,12 +864,11 @@ function [figFile, pngFile] = plot_within_timecourse_figure(latentEntry, tAxis, 
 
     g = latentEntry.groupIndex;
     w = latentEntry.withinIndex;
-    dslLabel = latentEntry.DSL.label;
-    dslByStimDirLabel = latentEntry.DSL.label_bystimdir;
 
+    % Short, stable file name. DSL keep/remove states remain in figure title.
     baseName = sanitize_filename(sprintf( ...
-        'group_%02d_within_latent_%03d_%s_%s_timecourse', ...
-        g, w, label_to_token(dslLabel), label_to_token(dslByStimDirLabel)));
+        'G%02d_W%03d_tc', ...
+        g, w));
 
     figFile = fullfile(timeDir, [baseName, '.fig']);
     pngFile = fullfile(timeDir, [baseName, '.png']);
@@ -911,18 +933,16 @@ end
 function [figFile, pngFile] = plot_anova_summary_figure(latentEntry, meta, anovaDir, alpha)
 
     g = latentEntry.groupIndex;
-    dslToken = label_to_token(latentEntry.DSL.label);
-    dslByStimDirToken = label_to_token(latentEntry.DSL.label_bystimdir);
 
+    % Short, stable file name. DSL keep/remove states remain in figure title.
     if strcmp(latentEntry.latentType, 'across')
         baseName = sanitize_filename(sprintf( ...
-            'group_%02d_across_latent_%03d_%s_%s_%s_anova', ...
-            g, latentEntry.acrossIndex, latentEntry.acrossCategory, ...
-            dslToken, dslByStimDirToken));
+            'G%02d_A%03d_%s_anova', ...
+            g, latentEntry.acrossIndex, latentEntry.acrossCategory));
     else
         baseName = sanitize_filename(sprintf( ...
-            'group_%02d_within_latent_%03d_%s_%s_anova', ...
-            g, latentEntry.withinIndex, dslToken, dslByStimDirToken));
+            'G%02d_W%03d_anova', ...
+            g, latentEntry.withinIndex));
     end
 
     figFile = fullfile(anovaDir, [baseName, '.fig']);
@@ -1162,6 +1182,30 @@ function out = label_to_token(in)
     out = sanitize_filename(out);
 end
 
+function out = dsl_keep_remove_label(flag, modeName)
+    stem = dsl_mode_label_stem(modeName);
+    if flag ~= 0
+        out = [stem, ' keep'];
+    else
+        out = [stem, ' remove'];
+    end
+end
+
+function out = dsl_mode_label_stem(modeName)
+    switch lower(modeName)
+        case 'alltrials'
+            out = 'DSL';
+        case 'bystimdir'
+            out = 'DSL(by stim_dir)';
+        case 'bystimnamedir'
+            out = 'DSL(by stim_name x stim_dir)';
+        case 'bycondition'
+            out = 'DSL(by condition)';
+        otherwise
+            error('Unknown DSL modeName: %s', modeName);
+    end
+end
+
 function all_tags = get_all_run_tags(model_data_allruns)
 %% =========================================================================
 % get_all_run_tags
@@ -1223,10 +1267,11 @@ function Results = analyze_dlag_latents_by_condition_split_by_dir(condition_full
 %       - latent_condition_analysis_split_by_dir_results.mat
 %
 % NOTES
-%   - DSL.logical == 1 is labeled as "DSL keep"
-%   - DSL.logical == 0 is labeled as "DSL remove"
-%   - DSL.logical_bystimdir is the final AND result and is used as the
-%     second latent keep/remove label. We do NOT use raw per-dir DSL labels.
+%   - DSL.logical is the all-trials DSL keep/remove label.
+%   - DSL.logical_bystimdir is the final AND result for the stim_dir split.
+%   - DSL.logical_bystimnamedir is the final AND result for the 4-way
+%     stim_name x stim_dir split.
+%   - DSL.logical_bycondition is the final AND result across all conditions.
 
     alpha = 0.05;
 
@@ -1242,12 +1287,24 @@ function Results = analyze_dlag_latents_by_condition_split_by_dir(condition_full
     if ~isfield(DSL, 'logical_bystimdir')
         error('DSL must contain field DSL.logical_bystimdir.');
     end
+    if ~isfield(DSL, 'logical_bystimnamedir')
+        error('DSL must contain field DSL.logical_bystimnamedir.');
+    end
+    if ~isfield(DSL, 'logical_bycondition')
+        error('DSL must contain field DSL.logical_bycondition.');
+    end
 
     if numel(DSL.logical) ~= numGroups
         error('DSL.logical must have one cell per group.');
     end
     if numel(DSL.logical_bystimdir) ~= numGroups
         error('DSL.logical_bystimdir must have one cell per group.');
+    end
+    if numel(DSL.logical_bystimnamedir) ~= numGroups
+        error('DSL.logical_bystimnamedir must have one cell per group.');
+    end
+    if numel(DSL.logical_bycondition) ~= numGroups
+        error('DSL.logical_bycondition must have one cell per group.');
     end
 
     if isempty(seqEst)
@@ -1268,6 +1325,12 @@ function Results = analyze_dlag_latents_by_condition_split_by_dir(condition_full
         end
         if numel(DSL.logical_bystimdir{g}) ~= localDims(g)
             error('DSL.logical_bystimdir{%d} length does not match xDim_across + xDim_within(%d).', g, g);
+        end
+        if numel(DSL.logical_bystimnamedir{g}) ~= localDims(g)
+            error('DSL.logical_bystimnamedir{%d} length does not match xDim_across + xDim_within(%d).', g, g);
+        end
+        if numel(DSL.logical_bycondition{g}) ~= localDims(g)
+            error('DSL.logical_bycondition{%d} length does not match xDim_across + xDim_within(%d).', g, g);
         end
     end
 
@@ -1334,6 +1397,8 @@ function Results = analyze_dlag_latents_by_condition_split_by_dir(condition_full
 
     Results.meta.DSLRules.allTrials = 'Use DSL.logical.';
     Results.meta.DSLRules.byStimDir = 'Use DSL.logical_bystimdir (final AND result; do not use raw per-dir values as latent labels).';
+    Results.meta.DSLRules.byStimNameDir = 'Use DSL.logical_bystimnamedir (final AND result across stim_name x stim_dir groups).';
+    Results.meta.DSLRules.byCondition = 'Use DSL.logical_bycondition (final AND result across all conditions).';
 
     Results.trialMeta = trialMeta;
 
@@ -1356,7 +1421,8 @@ function Results = analyze_dlag_latents_by_condition_split_by_dir(condition_full
 
             latentInfo = dirsplit_make_latent_info( ...
                 g, l, xDim_across, acrossCategory, ...
-                DSL.logical{g}(l), DSL.logical_bystimdir{g}(l));
+                DSL.logical{g}(l), DSL.logical_bystimdir{g}(l), ...
+                DSL.logical_bystimnamedir{g}(l), DSL.logical_bycondition{g}(l));
 
             % Store latent-level information shared across stim_dir subsets
             Results.group(g).latent(l).groupIndex = g;
@@ -1371,6 +1437,10 @@ function Results = analyze_dlag_latents_by_condition_split_by_dir(condition_full
             Results.group(g).latent(l).DSL.label = latentInfo.dslLabel;
             Results.group(g).latent(l).DSL.logical_bystimdir = DSL.logical_bystimdir{g}(l);
             Results.group(g).latent(l).DSL.label_bystimdir = latentInfo.dslByStimDirLabel;
+            Results.group(g).latent(l).DSL.logical_bystimnamedir = DSL.logical_bystimnamedir{g}(l);
+            Results.group(g).latent(l).DSL.label_bystimnamedir = latentInfo.dslByStimNameDirLabel;
+            Results.group(g).latent(l).DSL.logical_bycondition = DSL.logical_bycondition{g}(l);
+            Results.group(g).latent(l).DSL.label_bycondition = latentInfo.dslByConditionLabel;
 
             % Analyze stim_dir1 and stim_dir2 independently
             for d = 1:2
@@ -1397,7 +1467,9 @@ function Results = analyze_dlag_latents_by_condition_split_by_dir(condition_full
                     sprintf('Group %d | %s', g, dirTitle), ...
                     latentInfo.latentLine, ...
                     latentInfo.dslLabel, ...
-                    latentInfo.dslByStimDirLabel};
+                    latentInfo.dslByStimDirLabel, ...
+                    latentInfo.dslByStimNameDirLabel, ...
+                    latentInfo.dslByConditionLabel};
 
                 Results.group(g).latent(l).stim_dir(d).groupIndex = g;
                 Results.group(g).latent(l).stim_dir(d).localLatentIndex = l;
@@ -1412,6 +1484,10 @@ function Results = analyze_dlag_latents_by_condition_split_by_dir(condition_full
                 Results.group(g).latent(l).stim_dir(d).DSL.label = latentInfo.dslLabel;
                 Results.group(g).latent(l).stim_dir(d).DSL.logical_bystimdir = DSL.logical_bystimdir{g}(l);
                 Results.group(g).latent(l).stim_dir(d).DSL.label_bystimdir = latentInfo.dslByStimDirLabel;
+                Results.group(g).latent(l).stim_dir(d).DSL.logical_bystimnamedir = DSL.logical_bystimnamedir{g}(l);
+                Results.group(g).latent(l).stim_dir(d).DSL.label_bystimnamedir = latentInfo.dslByStimNameDirLabel;
+                Results.group(g).latent(l).stim_dir(d).DSL.logical_bycondition = DSL.logical_bycondition{g}(l);
+                Results.group(g).latent(l).stim_dir(d).DSL.label_bycondition = latentInfo.dslByConditionLabel;
 
                 Results.group(g).latent(l).stim_dir(d).stimDirCode = d;
                 Results.group(g).latent(l).stim_dir(d).stimDirLabel = trialMeta.stimDirLabels{d};
@@ -1723,7 +1799,7 @@ end
 % =========================================================================
 % Build one latent info struct
 % =========================================================================
-function latentInfo = dirsplit_make_latent_info(groupIdx, localIdx, xDim_across, acrossCategory, dslLogical, dslLogicalByStimDir)
+function latentInfo = dirsplit_make_latent_info(groupIdx, localIdx, xDim_across, acrossCategory, dslLogical, dslLogicalByStimDir, dslLogicalByStimNameDir, dslLogicalByCondition)
 
     latentInfo = struct();
     latentInfo.groupIndex = groupIdx;
@@ -1742,17 +1818,10 @@ function latentInfo = dirsplit_make_latent_info(groupIdx, localIdx, xDim_across,
         latentInfo.latentLine = sprintf('Within latent %d', localIdx - xDim_across);
     end
 
-    if dslLogical == 1
-        latentInfo.dslLabel = 'DSL keep';
-    else
-        latentInfo.dslLabel = 'DSL remove';
-    end
-
-    if dslLogicalByStimDir == 1
-        latentInfo.dslByStimDirLabel = 'DSL(by stim_dir) keep';
-    else
-        latentInfo.dslByStimDirLabel = 'DSL(by stim_dir) remove';
-    end
+    latentInfo.dslLabel = dsl_keep_remove_label(dslLogical, 'alltrials');
+    latentInfo.dslByStimDirLabel = dsl_keep_remove_label(dslLogicalByStimDir, 'bystimdir');
+    latentInfo.dslByStimNameDirLabel = dsl_keep_remove_label(dslLogicalByStimNameDir, 'bystimnamedir');
+    latentInfo.dslByConditionLabel = dsl_keep_remove_label(dslLogicalByCondition, 'bycondition');
 end
 
 % =========================================================================
@@ -2005,17 +2074,14 @@ end
 function [figFile, pngFile] = dirsplit_plot_across_timecourse_figure(Results, acrossIdx, timeDir)
 
     numGroups = Results.meta.numGroups;
-    condLabels = Results.meta.conditionLabels;
+    condLabels = Results.meta.conditionShortLabels;
     tAxis = Results.meta.timeAxis;
     category = Results.meta.acrossCategory{acrossIdx};
-    dslLabel = Results.group(1).latent(acrossIdx).DSL.label;
-    dslByStimDirLabel = Results.group(1).latent(acrossIdx).DSL.label_bystimdir;
 
+    % Short, stable file name. DSL keep/remove states remain in figure title.
     baseName = dirsplit_sanitize_filename(sprintf( ...
-        'across_latent_%03d_%s_%s_%s_split_by_dir_timecourse', ...
-        acrossIdx, category, ...
-        dirsplit_label_to_token(dslLabel), ...
-        dirsplit_label_to_token(dslByStimDirLabel)));
+        'A%03d_%s_splitdir_tc', ...
+        acrossIdx, category));
 
     figFile = fullfile(timeDir, [baseName, '.fig']);
     pngFile = fullfile(timeDir, [baseName, '.png']);
@@ -2074,14 +2140,11 @@ function [figFile, pngFile] = dirsplit_plot_within_timecourse_figure(latentEntry
 
     g = latentEntry.groupIndex;
     w = latentEntry.withinIndex;
-    dslLabel = latentEntry.DSL.label;
-    dslByStimDirLabel = latentEntry.DSL.label_bystimdir;
 
+    % Short, stable file name. DSL keep/remove states remain in figure title.
     baseName = dirsplit_sanitize_filename(sprintf( ...
-        'group_%02d_within_latent_%03d_%s_%s_split_by_dir_timecourse', ...
-        g, w, ...
-        dirsplit_label_to_token(dslLabel), ...
-        dirsplit_label_to_token(dslByStimDirLabel)));
+        'G%02d_W%03d_splitdir_tc', ...
+        g, w));
 
     figFile = fullfile(timeDir, [baseName, '.fig']);
     pngFile = fullfile(timeDir, [baseName, '.png']);
@@ -2113,7 +2176,7 @@ function [figFile, pngFile] = dirsplit_plot_within_timecourse_figure(latentEntry
 
     validLegend = isgraphics(legendHandles);
     if any(validLegend)
-        lgd = legend(axList(1), legendHandles(validLegend), meta.conditionLabels(validLegend), ...
+        lgd = legend(axList(1), legendHandles(validLegend), meta.conditionShortLabels(validLegend), ...
             'Interpreter', 'none', ...
             'Location', 'southoutside', ...
             'Orientation', 'horizontal');
@@ -2163,19 +2226,18 @@ function [figFile, pngFile] = dirsplit_plot_anova_summary_figure(latentEntry, me
     g = latentEntry.groupIndex;
     dirLabel = latentEntry.stimDirLabel;
     dirValueStr = dirsplit_format_value(latentEntry.stimDirValue);
-    dslToken = dirsplit_label_to_token(latentEntry.DSL.label);
-    dslByStimDirToken = dirsplit_label_to_token(latentEntry.DSL.label_bystimdir);
 
+    % Short, stable file name. DSL keep/remove states remain in figure title.
     if strcmp(latentEntry.latentType, 'across')
         baseName = dirsplit_sanitize_filename(sprintf( ...
-            'group_%02d_across_latent_%03d_%s_%s_%s_%s_%s_anova', ...
+            'G%02d_A%03d_%s_%s%s_anova', ...
             g, latentEntry.acrossIndex, latentEntry.acrossCategory, ...
-            dirLabel, dirValueStr, dslToken, dslByStimDirToken));
+            dirLabel, dirValueStr));
     else
         baseName = dirsplit_sanitize_filename(sprintf( ...
-            'group_%02d_within_latent_%03d_%s_%s_%s_%s_anova', ...
+            'G%02d_W%03d_%s%s_anova', ...
             g, latentEntry.withinIndex, ...
-            dirLabel, dirValueStr, dslToken, dslByStimDirToken));
+            dirLabel, dirValueStr));
     end
 
     figFile = fullfile(anovaDir, [baseName, '.fig']);
