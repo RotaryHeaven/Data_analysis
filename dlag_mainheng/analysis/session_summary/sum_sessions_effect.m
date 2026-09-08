@@ -1,6 +1,6 @@
 %% sum_sessions_effect.m
 % Summarize neuron-wise size or contrast effects across sessions.
-% Revision: 2026-08-25a
+% Revision: 2026-09-08a
 %
 % This script reads the result mats written by plot_size_effect.m or
 % plot_contrast_effect.m and produces seven independent figures:
@@ -40,7 +40,7 @@ root_dir = 'I:\np_data';
 % Effect, data, and model settings
 % -------------------------------------------------------------------------
 
-effect_type = 'size';
+effect_type = 'contrast';
 % Options:
 %   'size'
 %   'contrast'
@@ -124,13 +124,13 @@ show_session_fit_lines = true;
 % true : panels 2-5 show one line per session x group.
 % Panel 1 never shows regression lines.
 
-regression_mode = 'central';
+regression_mode = 'all';
 % 'all'     : use every finite neuron pair.
 % 'central' : use the non-tail points defined by the session-specific
 %             broken-axis threshold. If no break is active, central = all.
 % This same choice controls panel 6 and the optional lines in panels 2-5.
 
-use_broken_axis_display = true;
+use_broken_axis_display = false;
 break_start_prctile = 93.0;
 broken_axis_trigger_ratio = 1.0;
 tail_display_frac = 0.08;
@@ -151,7 +151,7 @@ scatter_show_legend = true;
 % Slope-summary settings
 % -------------------------------------------------------------------------
 
-slope_plot_style = 'bar_points';
+slope_plot_style = 'points_median';
 % Options:
 %   'bar_points'    : mean bar + session points + median square
 %   'violin'        : violin + session points + optional mean/median
@@ -184,7 +184,7 @@ slope_group_offset = 0.19;
 % Delta-summary settings
 % -------------------------------------------------------------------------
 
-delta_plot_style = 'bar_points';
+delta_plot_style = 'points_median';
 % Options:
 %   'bar_points'    : mean bar + raw points + median square
 %   'violin'        : violin + raw points + median line
@@ -193,14 +193,14 @@ delta_plot_style = 'bar_points';
 % Defaults match the subspace summary programs: the bar version displays
 % its mean, while violin and points-only versions do not display a mean.
 delta_show_mean = struct( ...
-    'bar_points', false, ...
+    'bar_points', true, ...
     'violin', false, ...
-    'points_median', false);
+    'points_median', true);
 
 delta_show_median = struct( ...
-    'bar_points', true, ...
+    'bar_points', false, ...
     'violin', true, ...
-    'points_median', true);
+    'points_median', false);
 
 % [] calculates the two sign rows independently. A 1 x 2 vector applies
 % the same limits to both rows; a 2 x 2 matrix sets one row per sign group.
@@ -236,7 +236,12 @@ delta_group_offset = 0.19;
 figure_visible = 'on';
 close_after_save = true;
 
-save_figure = true;  % saves both FIG and vector SVG
+% Each figure format can be enabled or disabled independently.
+save_fig = false;
+save_svg = false;
+save_png = true;
+png_dpi = 300;
+
 save_mat = true;
 
 font_name = 'Arial';
@@ -326,7 +331,9 @@ end
 
 validateLogicalScalarLocal(show_session_fit_lines, 'show_session_fit_lines');
 validateLogicalScalarLocal(skip_invalid_sessions, 'skip_invalid_sessions');
-validateLogicalScalarLocal(save_figure, 'save_figure');
+validateLogicalScalarLocal(save_fig, 'save_fig');
+validateLogicalScalarLocal(save_svg, 'save_svg');
+validateLogicalScalarLocal(save_png, 'save_png');
 validateLogicalScalarLocal(save_mat, 'save_mat');
 validateLogicalScalarLocal(close_after_save, 'close_after_save');
 validateLogicalScalarLocal(scatter_show_legend, 'scatter_show_legend');
@@ -341,7 +348,10 @@ validateLogicalScalarLocal(use_delta_overflow_display, ...
 
 show_session_fit_lines = logical(show_session_fit_lines);
 skip_invalid_sessions = logical(skip_invalid_sessions);
-save_figure = logical(save_figure);
+save_fig = logical(save_fig);
+save_svg = logical(save_svg);
+save_png = logical(save_png);
+save_any_figure = save_fig || save_svg || save_png;
 save_mat = logical(save_mat);
 close_after_save = logical(close_after_save);
 scatter_show_legend = logical(scatter_show_legend);
@@ -349,6 +359,10 @@ use_broken_axis_display = logical(use_broken_axis_display);
 force_symmetric_broken_axis = logical(force_symmetric_broken_axis);
 draw_broken_axis_marks = logical(draw_broken_axis_marks);
 use_delta_overflow_display = logical(use_delta_overflow_display);
+
+validateattributes(png_dpi, {'numeric'}, ...
+    {'scalar', 'real', 'integer', 'positive', 'finite'}, ...
+    mfilename, 'png_dpi');
 
 validateattributes(delta_overflow_prctile, {'numeric'}, ...
     {'scalar', 'real', 'finite', '>', 0, '<', 100}, ...
@@ -811,13 +825,15 @@ figure_suffixes = { ...
     '06_slope', ...
     '07_delta'};
 
-figure_files = repmat(struct('fig', '', 'svg', ''), 1, 7);
+figure_files = repmat(struct('fig', '', 'svg', '', 'png', ''), 1, 7);
 
 for k = 1:7
     figure_files(k).fig = fullfile( ...
         root_dir, sprintf('%s_%s.fig', out_base, figure_suffixes{k}));
     figure_files(k).svg = fullfile( ...
         root_dir, sprintf('%s_%s.svg', out_base, figure_suffixes{k}));
+    figure_files(k).png = fullfile( ...
+        root_dir, sprintf('%s_%s.png', out_base, figure_suffixes{k}));
 end
 
 mat_file = fullfile(root_dir, sprintf('%s_summary.mat', out_base));
@@ -825,7 +841,7 @@ mat_file = fullfile(root_dir, sprintf('%s_summary.mat', out_base));
 EffectSummary = struct();
 EffectSummary.meta = struct();
 EffectSummary.meta.program = mfilename;
-EffectSummary.meta.revision = '2026-08-25a';
+EffectSummary.meta.revision = '2026-09-08a';
 EffectSummary.meta.root_dir = root_dir;
 EffectSummary.meta.effect_type = effect_type;
 EffectSummary.meta.effect_metric = effect_metric;
@@ -891,7 +907,11 @@ EffectSummary.meta.group_label_source = 'manual group_names parameter';
 EffectSummary.meta.group_colors_base = group_colors_base;
 EffectSummary.meta.group_colors = group_colors;
 EffectSummary.meta.session_colors = session_colors;
-EffectSummary.meta.save_figure = save_figure;
+EffectSummary.meta.save_fig = save_fig;
+EffectSummary.meta.save_svg = save_svg;
+EffectSummary.meta.save_png = save_png;
+EffectSummary.meta.png_dpi = png_dpi;
+EffectSummary.meta.save_any_figure = save_any_figure;
 EffectSummary.meta.save_mat = save_mat;
 
 EffectSummary.field_names = field_names;
@@ -954,9 +974,9 @@ for p = 1:5
     figure_handles(p) = plotScatterSummaryLocal( ...
         scatter_summary(p), allow_fit, plot_config);
 
-    if save_figure
-        saveFigurePairLocal( ...
-            figure_handles(p), figure_files(p).fig, figure_files(p).svg);
+    if save_any_figure
+        saveFigureFilesLocal(figure_handles(p), figure_files(p), ...
+            save_fig, save_svg, save_png, png_dpi);
     end
 end
 
@@ -981,9 +1001,9 @@ slope_config.comparison_labels = field_labels(3:6);
 
 figure_handles(6) = plotSlopeSummaryLocal(slope_values, slope_config);
 
-if save_figure
-    saveFigurePairLocal( ...
-        figure_handles(6), figure_files(6).fig, figure_files(6).svg);
+if save_any_figure
+    saveFigureFilesLocal(figure_handles(6), figure_files(6), ...
+        save_fig, save_svg, save_png, png_dpi);
 end
 
 delta_config = plot_config;
@@ -1009,15 +1029,29 @@ delta_config.effect_type = effect_type;
 figure_handles(7) = plotDeltaSummaryLocal( ...
     delta_by_session, delta_pooled, delta_stats, delta_config);
 
-if save_figure
-    saveFigurePairLocal( ...
-        figure_handles(7), figure_files(7).fig, figure_files(7).svg);
+if save_any_figure
+    saveFigureFilesLocal(figure_handles(7), figure_files(7), ...
+        save_fig, save_svg, save_png, png_dpi);
 end
 
-if save_figure
-    fprintf('\nSaved seven FIG/SVG figure pairs in:\n  %s\n', root_dir);
+if save_any_figure
+    saved_format_names = {};
+    if save_fig
+        saved_format_names{end + 1} = 'FIG'; %#ok<SAGROW>
+    end
+    if save_svg
+        saved_format_names{end + 1} = 'SVG'; %#ok<SAGROW>
+    end
+    if save_png
+        saved_format_names{end + 1} = sprintf( ...
+            'PNG (%d dpi)', png_dpi); %#ok<SAGROW>
+    end
+
+    fprintf('\nSaved seven figure sets [%s] in:\n  %s\n', ...
+        strjoin(saved_format_names, ', '), root_dir);
 else
-    fprintf('\nFigure saving is disabled.\n');
+    fprintf(['\nFigure saving is disabled because save_fig, save_svg, ' ...
+             'and save_png are all false.\n']);
 end
 
 if ~isempty(skipped)
@@ -3195,18 +3229,41 @@ function [density, y_grid] = estimateDensityLocal(values, y_limits)
     y_grid = reshape(y_grid, 1, []);
 end
 
-function saveFigurePairLocal(fig, fig_file, svg_file)
+function saveFigureFilesLocal( ...
+        fig, figure_files, save_fig, save_svg, save_png, png_dpi)
 
     drawnow;
-    savefig(fig, fig_file);
+    saved_files = {};
 
-    try
-        exportgraphics(fig, svg_file, ...
-            'ContentType', 'vector', ...
-            'BackgroundColor', 'none');
-    catch
-        print(fig, svg_file, '-dsvg', '-painters');
+    if save_fig
+        savefig(fig, figure_files.fig);
+        saved_files{end + 1} = figure_files.fig; %#ok<AGROW>
     end
 
-    fprintf('Saved figure:\n  %s\n  %s\n', fig_file, svg_file);
+    if save_svg
+        try
+            exportgraphics(fig, figure_files.svg, ...
+                'ContentType', 'vector', ...
+                'BackgroundColor', 'none');
+        catch
+            print(fig, figure_files.svg, '-dsvg', '-painters');
+        end
+        saved_files{end + 1} = figure_files.svg; %#ok<AGROW>
+    end
+
+    if save_png
+        try
+            exportgraphics(fig, figure_files.png, ...
+                'Resolution', png_dpi);
+        catch
+            print(fig, figure_files.png, '-dpng', ...
+                sprintf('-r%d', png_dpi));
+        end
+        saved_files{end + 1} = figure_files.png; %#ok<AGROW>
+    end
+
+    fprintf('Saved figure:\n');
+    for k = 1:numel(saved_files)
+        fprintf('  %s\n', saved_files{k});
+    end
 end
